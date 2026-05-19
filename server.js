@@ -11,6 +11,10 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+// HEALTH CHECK
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date() });
+});
 
 // SUPABASE
 const supabase = createClient(
