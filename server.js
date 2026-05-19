@@ -3,7 +3,6 @@ const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
 const nodemailer = require('nodemailer');
 const cors = require('cors');
-const axios = require('axios');
 
 const app = express();
 app.use(cors({
@@ -11,10 +10,6 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
-// HEALTH CHECK
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date() });
-});
 
 // SUPABASE
 const supabase = createClient(
@@ -48,19 +43,20 @@ app.post('/api/submit-case', async (req, res) => {
       type_indiening, reden_wanbetaling, extra_informatie
     } = req.body;
 
-    // Categorize with Claude
+    // Categorize
     let categorie = 'betaling_vergeten';
     if (reden_wanbetaling) {
-      if (reden_wanbetaling.toLowerCase().includes('dispute') || reden_wanbetaling.toLowerCase().includes('niet eens')) {
+      const reden = reden_wanbetaling.toLowerCase();
+      if (reden.includes('dispute') || reden.includes('niet eens')) {
         categorie = 'dispute';
-      } else if (reden_wanbetaling.toLowerCase().includes('geen contact') || reden_wanbetaling.toLowerCase().includes('niet bereikbaar')) {
+      } else if (reden.includes('geen contact') || reden.includes('niet bereikbaar')) {
         categorie = 'geen_communicatie';
-      } else if (reden_wanbetaling.toLowerCase().includes('financieel') || reden_wanbetaling.toLowerCase().includes('moeilijk')) {
+      } else if (reden.includes('financieel') || reden.includes('moeilijk')) {
         categorie = 'financiele_moeilijkheden';
       }
     }
 
-    // Insert case
+    // Insert case in Supabase
     const { data: caseData, error: caseError } = await supabase
       .from('cases')
       .insert([{
@@ -73,99 +69,84 @@ app.post('/api/submit-case', async (req, res) => {
       }])
       .select();
 
-    if (caseError) throw caseError;
+    if (caseError) {
+      console.error('Case insert error:', caseError);
+      throw caseError;
+    }
+    
     const caseId = caseData[0].id;
+    console.log('Case inserted with ID:', caseId);
 
-    // Send email immediately
-    const { data: templates } = await supabase
-      .from('email_templates')
-      .select('*')
-      .eq('categorie', categorie)
-      .single();
+    // Send email (with try/catch so failure doesn't crash)
+    try {
+      const { data: templates } = await supabase
+        .from('email_templates')
+        .select('*')
+        .eq('categorie', categorie)
+        .single();
 
-    if (templates) {
-      const template = templates;
-      const subject = template.subject_template
-        .replace(/{{factuurnummer}}/g, factuurnummer)
-        .replace(/{{bedrag}}/g, bedrag)
-        .replace(/{{debiteur_naam}}/g, debiteur_naam);
+      if (templates) {
+        const subject = templates.subject_template
+          .replace(/{{factuurnummer}}/g, factuurnummer || '')
+          .replace(/{{bedrag}}/g, bedrag || '')
+          .replace(/{{debiteur_naam}}/g, debiteur_naam || '');
 
-      const body = template.body_template
-        .replace(/{{factuurnummer}}/g, factuurnummer)
-        .replace(/{{bedrag}}/g, bedrag)
-        .replace(/{{debiteur_naam}}/g, debiteur_naam)
-        .replace(/{{debiteur_contactpersoon}}/g, debiteur_contactpersoon)
-        .replace(/{{bedrijfsnaam}}/g, bedrijfsnaam)
-        .replace(/{{contactpersoon}}/g, contactpersoon)
-        .replace(/{{email_bedrijf}}/g, email_bedrijf)
-        .replace(/{{telefoon_bedrijf}}/g, telefoon_bedrijf)
-        .replace(/{{omschrijving}}/g, omschrijving);
+        const body = templates.body_template
+          .replace(/{{factuurnummer}}/g, factuurnummer || '')
+          .replace(/{{bedrag}}/g, bedrag || '')
+          .replace(/{{debiteur_naam}}/g, debiteur_naam || '')
+          .replace(/{{debiteur_contactpersoon}}/g, debiteur_contactpersoon || '')
+          .replace(/{{bedrijfsnaam}}/g, bedrijfsnaam || '')
+          .replace(/{{contactpersoon}}/g, contactpersoon || '')
+          .replace(/{{email_bedrijf}}/g, email_bedrijf || '')
+          .replace(/{{telefoon_bedrijf}}/g, telefoon_bedrijf || '')
+          .replace(/{{omschrijving}}/g, omschrijving || '');
 
-      await emailTransporter.sendMail({
-if (templates) {
-  const template = templates;
-  const subject = template.subject_template
-    .replace(/{{factuurnummer}}/g, factuurnummer)
-    .replace(/{{bedrag}}/g, bedrag)
-    .replace(/{{debiteur_naam}}/g, debiteur_naam);
+        try {
+          await emailTransporter.sendMail({
+            from: process.env.SMTP_FROM,
+            to: email_debiteur,
+            subject: subject,
+            html: body,
+            text: body
+          });
+          console.log('Email sent to:', email_debiteur);
 
-  const body = template.body_template
-    .replace(/{{factuurnummer}}/g, factuurnummer)
-    .replace(/{{bedrag}}/g, bedrag)
-    .replace(/{{debiteur_naam}}/g, debiteur_naam)
-    .replace(/{{debiteur_contactpersoon}}/g, debiteur_contactpersoon)
-    .replace(/{{bedrijfsnaam}}/g, bedrijfsnaam)
-    .replace(/{{contactpersoon}}/g, contactpersoon)
-    .replace(/{{email_bedrijf}}/g, email_bedrijf)
-    .replace(/{{telefoon_bedrijf}}/g, telefoon_bedrijf)
-    .replace(/{{omschrijving}}/g, omschrijving);
+          await supabase
+            .from('email_logs')
+            .insert([{
+              case_id: caseId,
+              recipient_email: email_debiteur,
+              subject: subject,
+              status: 'sent'
+            }]);
 
-  try {
-    await emailTransporter.sendMail({
-      from: process.env.SMTP_FROM,        
-      to: email_debiteur,
-      subject: subject,
-      html: body,
-      text: body
-    });
-    console.log('Email sent successfully');
-  } catch (emailError) {
-    console.error('Email send error:', emailError);
-  }
+          await supabase
+            .from('cases')
+            .update({ email_sent_at: new Date().toISOString(), status: 'email_sent' })
+            .eq('id', caseId);
+        } catch (emailError) {
+          console.error('Email send error:', emailError.message);
+        }
+      }
+    } catch (templateError) {
+      console.error('Template error:', templateError.message);
+    }
 
-  try {
-    await supabase
-      .from('email_logs')
-      .insert([{
-        case_id: caseId,
-        recipient_email: email_debiteur,
-        subject: subject,
-        status: 'sent'
-      }]);
-  } catch (logError) {
-    console.error('Log error:', logError);
-  }
-
-  try {
-    await supabase
-      .from('cases')
-      .update({ email_sent_at: new Date().toISOString(), status: 'email_sent' })
-      .eq('id', caseId);
-  } catch (updateError) {
-    console.error('Update error:', updateError);
-  }
-}
-
-    // Create campaign
-    await supabase
-      .from('email_campaigns')
-      .insert([{
-        case_id: caseId,
-        debiteur_email: email_debiteur,
-        current_step: 1,
-        status: 'sent',
-        email_1_sent_at: new Date().toISOString()
-      }]);
+    // Create campaign (with try/catch)
+    try {
+      await supabase
+        .from('email_campaigns')
+        .insert([{
+          case_id: caseId,
+          debiteur_email: email_debiteur,
+          current_step: 1,
+          status: 'sent',
+          email_1_sent_at: new Date().toISOString()
+        }]);
+    } catch (campaignError) {
+      console.error('Campaign error:', campaignError.message);
+    }
 
     res.json({
       success: true,
