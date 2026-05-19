@@ -102,27 +102,59 @@ app.post('/api/submit-case', async (req, res) => {
         .replace(/{{omschrijving}}/g, omschrijving);
 
       await emailTransporter.sendMail({
-        from: process.env.SMTP_FROM,        
-        to: email_debiteur,
+if (templates) {
+  const template = templates;
+  const subject = template.subject_template
+    .replace(/{{factuurnummer}}/g, factuurnummer)
+    .replace(/{{bedrag}}/g, bedrag)
+    .replace(/{{debiteur_naam}}/g, debiteur_naam);
+
+  const body = template.body_template
+    .replace(/{{factuurnummer}}/g, factuurnummer)
+    .replace(/{{bedrag}}/g, bedrag)
+    .replace(/{{debiteur_naam}}/g, debiteur_naam)
+    .replace(/{{debiteur_contactpersoon}}/g, debiteur_contactpersoon)
+    .replace(/{{bedrijfsnaam}}/g, bedrijfsnaam)
+    .replace(/{{contactpersoon}}/g, contactpersoon)
+    .replace(/{{email_bedrijf}}/g, email_bedrijf)
+    .replace(/{{telefoon_bedrijf}}/g, telefoon_bedrijf)
+    .replace(/{{omschrijving}}/g, omschrijving);
+
+  try {
+    await emailTransporter.sendMail({
+      from: process.env.SMTP_FROM,        
+      to: email_debiteur,
+      subject: subject,
+      html: body,
+      text: body
+    });
+    console.log('Email sent successfully');
+  } catch (emailError) {
+    console.error('Email send error:', emailError);
+  }
+
+  try {
+    await supabase
+      .from('email_logs')
+      .insert([{
+        case_id: caseId,
+        recipient_email: email_debiteur,
         subject: subject,
-        html: body,
-        text: body
-      });
+        status: 'sent'
+      }]);
+  } catch (logError) {
+    console.error('Log error:', logError);
+  }
 
-      await supabase
-        .from('email_logs')
-        .insert([{
-          case_id: caseId,
-          recipient_email: email_debiteur,
-          subject: subject,
-          status: 'sent'
-        }]);
-
-      await supabase
-        .from('cases')
-        .update({ email_sent_at: new Date().toISOString(), status: 'email_sent' })
-        .eq('id', caseId);
-    }
+  try {
+    await supabase
+      .from('cases')
+      .update({ email_sent_at: new Date().toISOString(), status: 'email_sent' })
+      .eq('id', caseId);
+  } catch (updateError) {
+    console.error('Update error:', updateError);
+  }
+}
 
     // Create campaign
     await supabase
