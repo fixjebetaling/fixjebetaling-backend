@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const cors = require('cors');
 
 const app = express();
@@ -17,16 +17,8 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// EMAIL
-const emailTransporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: parseInt(process.env.SMTP_PORT),
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASSWORD
-  }
-});
+// RESEND EMAIL
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // HEALTH CHECK
 app.get('/health', (req, res) => {
@@ -103,7 +95,7 @@ app.post('/api/submit-case', async (req, res) => {
     
     console.log('Case inserted successfully');
 
-    // Send email in background (non-blocking)
+    // Send email in background via Resend (non-blocking)
     (async () => {
       try {
         const { data: templates } = await supabase
@@ -130,15 +122,16 @@ app.post('/api/submit-case', async (req, res) => {
             .replace(/{{omschrijving}}/g, omschrijving || '');
 
           try {
-            await emailTransporter.sendMail({
-              from: process.env.SMTP_FROM,
+            const emailResult = await resend.emails.send({
+              from: 'Betaalopvolging Nederland <noreply@notify.fixjebetaling.nl>',
               to: email_debiteur,
               subject: subject,
-              html: body,
-              text: body
+              html: body
             });
-            console.log('Email sent to:', email_debiteur);
 
+            console.log('Email sent via Resend:', { to: email_debiteur, id: emailResult.id });
+
+            // Log email send
             await supabase
               .from('email_logs')
               .insert([{
@@ -146,6 +139,13 @@ app.post('/api/submit-case', async (req, res) => {
                 subject: subject,
                 status: 'sent'
               }]);
+
+            // Update case status
+            await supabase
+              .from('cases')
+              .update({ email_sent_at: new Date().toISOString(), status: 'email_sent' })
+              .eq('factuurnummer', factuurnummer);
+
           } catch (emailError) {
             console.error('Email send error:', emailError.message);
           }
