@@ -102,7 +102,7 @@ app.post('/api/submit-case', async (req, res) => {
         .replace(/{{omschrijving}}/g, omschrijving);
 
       await emailTransporter.sendMail({
-        from: email_bedrijf,
+        from: process.env.SMTP_FROM,        
         to: email_debiteur,
         subject: subject,
         html: body,
