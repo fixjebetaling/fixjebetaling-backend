@@ -36,12 +36,23 @@ app.get('/health', (req, res) => {
 // SUBMIT CASE
 app.post('/api/submit-case', async (req, res) => {
   try {
-    const {
-      bedrijfsnaam, contactpersoon, email_bedrijf, telefoon_bedrijf,
-      debiteur_naam, debiteur_contactpersoon, email_debiteur, telefoon_debiteur,
-      factuurnummer, bedrag, factuurdatum, vervaldatum, omschrijving,
-      type_indiening, reden_wanbetaling, extra_informatie
-    } = req.body;
+    // Map camelCase from frontend to Dutch column names
+    const bedrijfsnaam = req.body.bedrijfsnaam || req.body.companyName;
+    const contactpersoon = req.body.contactpersoon || req.body.contactName;
+    const email_bedrijf = req.body.email_bedrijf || req.body.email;
+    const telefoon_bedrijf = req.body.telefoon_bedrijf || req.body.phone;
+    const debiteur_naam = req.body.debiteur_naam || req.body.debtorName;
+    const debiteur_contactpersoon = req.body.debiteur_contactpersoon || req.body.debtorContact;
+    const email_debiteur = req.body.email_debiteur || req.body.debtorEmail;
+    const telefoon_debiteur = req.body.telefoon_debiteur || req.body.debtorPhone;
+    const factuurnummer = req.body.factuurnummer || req.body.invoiceNumber;
+    const bedrag = req.body.bedrag || req.body.amount;
+    const factuurdatum = req.body.factuurdatum || req.body.invoiceDate;
+    const vervaldatum = req.body.vervaldatum || req.body.dueDate;
+    const omschrijving = req.body.omschrijving || req.body.description;
+    const type_indiening = req.body.type_indiening || req.body.submissionType;
+    const reden_wanbetaling = req.body.reden_wanbetaling || req.body.reason;
+    const extra_informatie = req.body.extra_informatie || req.body.additionalInfo;
 
     // Categorize
     let categorie = 'betaling_vergeten';
@@ -60,10 +71,22 @@ app.post('/api/submit-case', async (req, res) => {
     const { data: caseData, error: caseError } = await supabase
       .from('cases')
       .insert([{
-        bedrijfsnaam, contactpersoon, email_bedrijf, telefoon_bedrijf,
-        debiteur_naam, debiteur_contactpersoon, email_debiteur, telefoon_debiteur,
+        bedrijfsnaam,
+        contactpersoon,
+        email_bedrijf,
+        telefoon_bedrijf,
+        debiteur_naam,
+        debiteur_contactpersoon,
+        email_debiteur,
+        telefoon_debiteur,
+        factuurnummer,
         bedrag: bedrag ? parseFloat(bedrag) : 0,
-        type_indiening, reden_wanbetaling, extra_informatie,
+        factuurdatum,
+        vervaldatum,
+        omschrijving,
+        type_indiening,
+        reden_wanbetaling,
+        extra_informatie,
         email_categorie: categorie,
         status: 'submitted'
       }])
@@ -77,7 +100,7 @@ app.post('/api/submit-case', async (req, res) => {
     const caseId = caseData[0].id;
     console.log('Case inserted with ID:', caseId);
 
-    // Send email (with try/catch so failure doesn't crash)
+    // Send email (with try/catch so failure doesn't crash response)
     try {
       const { data: templates } = await supabase
         .from('email_templates')
