@@ -36,25 +36,26 @@ app.get('/health', (req, res) => {
 // SUBMIT CASE
 app.post('/api/submit-case', async (req, res) => {
   try {
-    // Map camelCase from frontend to Dutch column names
-    const bedrijfsnaam = req.body.bedrijfsnaam || req.body.companyName;
-    const contactpersoon = req.body.contactpersoon || req.body.contactName;
-    const email_bedrijf = req.body.email_bedrijf || req.body.email;
-    const telefoon_bedrijf = req.body.telefoon_bedrijf || req.body.phone;
-    const debiteur_naam = req.body.debiteur_naam || req.body.debtorName;
-    const debiteur_contactpersoon = req.body.debiteur_contactpersoon || req.body.debtorContact;
-    const email_debiteur = req.body.email_debiteur || req.body.debtorEmail;
-    const telefoon_debiteur = req.body.telefoon_debiteur || req.body.debtorPhone;
-    const factuurnummer = req.body.factuurnummer || req.body.invoiceNumber;
-    const bedrag = req.body.bedrag || req.body.amount;
-    const factuurdatum = req.body.factuurdatum || req.body.invoiceDate;
-    const vervaldatum = req.body.vervaldatum || req.body.dueDate;
-    const omschrijving = req.body.omschrijving || req.body.description;
-    const type_indiening = req.body.type_indiening || req.body.submissionType;
-    const reden_wanbetaling = req.body.reden_wanbetaling || req.body.reason;
-    const extra_informatie = req.body.extra_informatie || req.body.additionalInfo;
+    // Map camelCase from frontend to snake_case database columns
+    const b = req.body;
+    const bedrijfsnaam = b.bedrijfsnaam;
+    const contactpersoon = b.contactpersoon;
+    const email_bedrijf = b.emailBedrijf;
+    const telefoon_bedrijf = b.telefoonBedrijf;
+    const debiteur_naam = b.debiteurNaam;
+    const debiteur_contactpersoon = b.debiteurContactpersoon || '';
+    const email_debiteur = b.emailDebiteur;
+    const telefoon_debiteur = b.telefoonDebiteur;
+    const factuurnummer = b.factuurnummer;
+    const bedrag = b.bedrag;
+    const factuurdatum = b.factuurdatum;
+    const vervaldatum = b.vervaldatum;
+    const omschrijving = b.omschrijving;
+    const type_indiening = b.typeIndiening || 'single';
+    const reden_wanbetaling = b.redenWanbetaling;
+    const extra_informatie = b.extraInformatie || '';
 
-    console.log('Received case submission:', { factuurnummer, email_debiteur });
+    console.log('Received case:', { factuurnummer, email_debiteur, bedrijfsnaam });
 
     // Categorize
     let categorie = 'betaling_vergeten';
@@ -71,8 +72,8 @@ app.post('/api/submit-case', async (req, res) => {
 
     console.log('Category:', categorie);
 
-    // Insert case in Supabase (WITHOUT .select() to avoid RLS issues)
-    const { data: caseData, error: caseError } = await supabase
+    // Insert case in Supabase
+    const { error: caseError } = await supabase
       .from('cases')
       .insert([{
         bedrijfsnaam,
@@ -102,7 +103,7 @@ app.post('/api/submit-case', async (req, res) => {
     
     console.log('Case inserted successfully');
 
-    // Send email (optional - doesn't block response)
+    // Send email in background (non-blocking)
     (async () => {
       try {
         const { data: templates } = await supabase
@@ -154,26 +155,26 @@ app.post('/api/submit-case', async (req, res) => {
       }
     })();
 
-    // Create campaign (optional - doesn't block response)
+    // Create campaign in background (non-blocking)
     (async () => {
       try {
-        const { data: caseCheck } = await supabase
+        const { data: caseData } = await supabase
           .from('cases')
           .select('id')
           .eq('factuurnummer', factuurnummer)
           .single();
 
-        if (caseCheck) {
+        if (caseData) {
           await supabase
             .from('email_campaigns')
             .insert([{
-              case_id: caseCheck.id,
+              case_id: caseData.id,
               debiteur_email: email_debiteur,
               current_step: 1,
               status: 'sent',
               email_1_sent_at: new Date().toISOString()
             }]);
-          console.log('Campaign created');
+          console.log('Campaign created for case:', caseData.id);
         }
       } catch (campaignError) {
         console.error('Campaign error:', campaignError.message);
@@ -181,7 +182,7 @@ app.post('/api/submit-case', async (req, res) => {
     })();
 
     // IMPORTANT: Return response immediately!
-    return res.json({
+    return res.status(200).json({
       success: true,
       message: 'Case submitted successfully',
       categorie: categorie
