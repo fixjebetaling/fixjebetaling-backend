@@ -14,7 +14,7 @@ app.use(express.json());
 // SUPABASE
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY  ← GOED!
+  process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
 // EMAIL
