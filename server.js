@@ -66,7 +66,7 @@ app.post('/api/submit-case', async (req, res) => {
       .insert([{
         bedrijfsnaam, contactpersoon, email_bedrijf, telefoon_bedrijf,
         debiteur_naam, debiteur_contactpersoon, email_debiteur, telefoon_debiteur,
-        factuurnummer, bedrag: parseFloat(bedrag), factuurdatum, vervaldatum, omschrijving,
+        bedrag: bedrag ? parseFloat(bedrag) : 0,
         type_indiening, reden_wanbetaling, extra_informatie,
         email_categorie: categorie,
         status: 'submitted'
