@@ -4,6 +4,15 @@ const { createClient } = require('@supabase/supabase-js');
 const { Resend } = require('resend');
 const cors = require('cors');
 
+// Validate required env vars at startup so failures are obvious in Railway logs
+const REQUIRED_ENV = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'RESEND_API_KEY'];
+const missingEnv = REQUIRED_ENV.filter(k => !process.env[k]);
+if (missingEnv.length > 0) {
+  console.error('FATAL: Missing environment variables:', missingEnv.join(', '));
+  console.error('Set these in Railway > Variables before deploying.');
+  process.exit(1);
+}
+
 const app = express();
 app.use(cors({
   origin: '*',
@@ -28,7 +37,6 @@ app.get('/health', (req, res) => {
 // SUBMIT CASE
 app.post('/api/submit-case', async (req, res) => {
   try {
-    // Map camelCase from frontend to snake_case database columns
     const b = req.body;
     const bedrijfsnaam = b.bedrijfsnaam;
     const contactpersoon = b.contactpersoon;
@@ -89,69 +97,79 @@ app.post('/api/submit-case', async (req, res) => {
       }]);
 
     if (caseError) {
-      console.error('Case insert error:', caseError);
+      console.error('Case insert error:', JSON.stringify(caseError));
       return res.status(500).json({ error: 'Database insert failed: ' + caseError.message });
     }
-    
+
     console.log('Case inserted successfully');
 
     // Send email in background via Resend (non-blocking)
     (async () => {
       try {
-        const { data: templates } = await supabase
+        const { data: template, error: templateError } = await supabase
           .from('email_templates')
           .select('*')
           .eq('categorie', categorie)
           .single();
 
-        if (templates) {
-          const subject = templates.subject_template
-            .replace(/{{factuurnummer}}/g, factuurnummer || '')
-            .replace(/{{bedrag}}/g, bedrag || '')
-            .replace(/{{debiteur_naam}}/g, debiteur_naam || '');
-
-          const body = templates.body_template
-            .replace(/{{factuurnummer}}/g, factuurnummer || '')
-            .replace(/{{bedrag}}/g, bedrag || '')
-            .replace(/{{debiteur_naam}}/g, debiteur_naam || '')
-            .replace(/{{debiteur_contactpersoon}}/g, debiteur_contactpersoon || '')
-            .replace(/{{bedrijfsnaam}}/g, bedrijfsnaam || '')
-            .replace(/{{contactpersoon}}/g, contactpersoon || '')
-            .replace(/{{email_bedrijf}}/g, email_bedrijf || '')
-            .replace(/{{telefoon_bedrijf}}/g, telefoon_bedrijf || '')
-            .replace(/{{omschrijving}}/g, omschrijving || '');
-
-          try {
-            const emailResult = await resend.emails.send({
-              from: 'Betaalopvolging Nederland <noreply@notify.fixjebetaling.nl>',
-              to: email_debiteur,
-              subject: subject,
-              html: body
-            });
-
-            console.log('Email sent via Resend:', { to: email_debiteur, id: emailResult.id });
-
-            // Log email send
-            await supabase
-              .from('email_logs')
-              .insert([{
-                recipient_email: email_debiteur,
-                subject: subject,
-                status: 'sent'
-              }]);
-
-            // Update case status
-            await supabase
-              .from('cases')
-              .update({ email_sent_at: new Date().toISOString(), status: 'email_sent' })
-              .eq('factuurnummer', factuurnummer);
-
-          } catch (emailError) {
-            console.error('Email send error:', emailError.message);
-          }
+        if (templateError) {
+          console.error('Template fetch error:', JSON.stringify(templateError));
+          return;
         }
-      } catch (templateError) {
-        console.error('Template error:', templateError.message);
+
+        if (!template) {
+          console.warn('No email template found for categorie:', categorie);
+          return;
+        }
+
+        const subject = template.subject_template
+          .replace(/{{factuurnummer}}/g, factuurnummer || '')
+          .replace(/{{bedrag}}/g, bedrag || '')
+          .replace(/{{debiteur_naam}}/g, debiteur_naam || '');
+
+        const body = template.body_template
+          .replace(/{{factuurnummer}}/g, factuurnummer || '')
+          .replace(/{{bedrag}}/g, bedrag || '')
+          .replace(/{{debiteur_naam}}/g, debiteur_naam || '')
+          .replace(/{{debiteur_contactpersoon}}/g, debiteur_contactpersoon || '')
+          .replace(/{{bedrijfsnaam}}/g, bedrijfsnaam || '')
+          .replace(/{{contactpersoon}}/g, contactpersoon || '')
+          .replace(/{{email_bedrijf}}/g, email_bedrijf || '')
+          .replace(/{{telefoon_bedrijf}}/g, telefoon_bedrijf || '')
+          .replace(/{{omschrijving}}/g, omschrijving || '');
+
+        // Resend SDK v2 returns { data, error } — not a direct object
+        const { data: emailData, error: emailSendError } = await resend.emails.send({
+          from: 'Betaalopvolging Nederland <noreply@notify.fixjebetaling.nl>',
+          to: email_debiteur,
+          subject: subject,
+          html: body
+        });
+
+        if (emailSendError) {
+          console.error('Resend error:', JSON.stringify(emailSendError));
+          return;
+        }
+
+        console.log('Email sent via Resend:', { to: email_debiteur, id: emailData.id });
+
+        // Log email send
+        await supabase
+          .from('email_logs')
+          .insert([{
+            recipient_email: email_debiteur,
+            subject: subject,
+            status: 'sent'
+          }]);
+
+        // Update case status
+        await supabase
+          .from('cases')
+          .update({ email_sent_at: new Date().toISOString(), status: 'email_sent' })
+          .eq('factuurnummer', factuurnummer);
+
+      } catch (err) {
+        console.error('Email background error:', err.message);
       }
     })();
 
@@ -181,7 +199,6 @@ app.post('/api/submit-case', async (req, res) => {
       }
     })();
 
-    // IMPORTANT: Return response immediately!
     return res.status(200).json({
       success: true,
       message: 'Case submitted successfully',
@@ -283,5 +300,5 @@ app.get('/api/stats', async (req, res) => {
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
