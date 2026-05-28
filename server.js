@@ -352,12 +352,42 @@ app.get('/api/cases', async (req, res) => {
   }
 });
 
+// UPDATE CAMPAIGN STATUS (betaald / gestopt)
+app.put('/api/campaigns/:id/status', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    const allowed = ['paid', 'stopped', 'sent', 'step2_sent', 'step3_sent'];
+    if (!allowed.includes(status)) {
+      return res.status(400).json({ error: 'Ongeldige status. Gebruik: paid, stopped, sent, step2_sent of step3_sent' });
+    }
+
+    const { data, error } = await supabase
+      .from('email_campaigns')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select();
+
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: 'Campagne niet gevonden' });
+    }
+
+    console.log(`Campaign ${id} status updated to: ${status}`);
+    return res.json({ success: true, campaign: data[0] });
+  } catch (error) {
+    console.error('Update campaign status error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 // GET CAMPAIGNS
 app.get('/api/campaigns', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('email_campaigns')
-      .select('*')
+      .select('*, cases(bedrijfsnaam, debiteur_naam, factuurnummer, bedrag, email_debiteur)')
       .order('created_at', { ascending: false })
       .limit(100);
 
