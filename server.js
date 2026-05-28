@@ -122,23 +122,30 @@ app.post('/api/submit-case', async (req, res) => {
           return;
         }
 
-        const subject = template.subject_template
-          .replace(/{{factuurnummer}}/g, factuurnummer || '')
-          .replace(/{{bedrag}}/g, bedrag || '')
-          .replace(/{{debiteur_naam}}/g, debiteur_naam || '');
+        // Alle form-velden als variabelen — elk {{veld}} in template wordt automatisch ingevuld
+        const vars = {
+          factuurnummer:          factuurnummer || '',
+          bedrag:                 bedrag || '',
+          factuurdatum:           factuurdatum || '',
+          vervaldatum:            vervaldatum || '',
+          debiteur_naam:          debiteur_naam || '',
+          debiteur_contactpersoon: debiteur_contactpersoon || '',
+          bedrijfsnaam:           bedrijfsnaam || '',
+          contactpersoon:         contactpersoon || '',
+          email_bedrijf:          email_bedrijf || '',
+          telefoon_bedrijf:       telefoon_bedrijf || '',
+          omschrijving:           omschrijving || '',
+          reden_wanbetaling:      reden_wanbetaling || '',
+          extra_informatie:       extra_informatie || '',
+          email_debiteur:         email_debiteur || '',
+          telefoon_debiteur:      telefoon_debiteur || '',
+          type_indiening:         type_indiening || '',
+        };
 
-        const body = template.body_template
-          .replace(/{{factuurnummer}}/g, factuurnummer || '')
-          .replace(/{{bedrag}}/g, bedrag || '')
-          .replace(/{{factuurdatum}}/g, factuurdatum || '')
-          .replace(/{{vervaldatum}}/g, vervaldatum || '')
-          .replace(/{{debiteur_naam}}/g, debiteur_naam || '')
-          .replace(/{{debiteur_contactpersoon}}/g, debiteur_contactpersoon || '')
-          .replace(/{{bedrijfsnaam}}/g, bedrijfsnaam || '')
-          .replace(/{{contactpersoon}}/g, contactpersoon || '')
-          .replace(/{{email_bedrijf}}/g, email_bedrijf || '')
-          .replace(/{{telefoon_bedrijf}}/g, telefoon_bedrijf || '')
-          .replace(/{{omschrijving}}/g, omschrijving || '');
+        const fill = (tmpl) => tmpl.replace(/{{(\w+)}}/g, (_, key) => vars[key] ?? '');
+
+        const subject = fill(template.subject_template);
+        const body    = fill(template.body_template);
 
         // Resend SDK v2 returns { data, error } — not a direct object
         const { data: emailData, error: emailSendError } = await resend.emails.send({
