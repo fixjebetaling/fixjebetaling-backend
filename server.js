@@ -5,7 +5,7 @@ const { Resend } = require('resend');
 const cors = require('cors');
 
 // Validate required env vars at startup so failures are obvious in Railway logs
-const REQUIRED_ENV = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'RESEND_API_KEY'];
+const REQUIRED_ENV = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'RESEND_API_KEY', 'CRON_SECRET'];
 const missingEnv = REQUIRED_ENV.filter(k => !process.env[k]);
 if (missingEnv.length > 0) {
   console.error('FATAL: Missing environment variables:', missingEnv.join(', '));
@@ -219,6 +219,119 @@ app.post('/api/submit-case', async (req, res) => {
 
   } catch (error) {
     console.error('Handler error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// PROCESS CAMPAIGNS — wordt dagelijks aangeroepen door cron
+app.post('/api/process-campaigns', async (req, res) => {
+  // Beveilig met secret zodat alleen de cron dit kan aanroepen
+  if (req.headers['x-cron-secret'] !== process.env.CRON_SECRET) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const now = new Date();
+  const results = { step2_sent: 0, step3_sent: 0, errors: [] };
+
+  // Helper: vul alle {{variabelen}} in template in vanuit case-data
+  const fill = (tmpl, c) => tmpl.replace(/{{(\w+)}}/g, (_, key) => c[key] ?? '');
+
+  // Helper: haal template op per categorie
+  const getTemplate = async (categorie) => {
+    const { data } = await supabase
+      .from('email_templates')
+      .select('*')
+      .eq('categorie', categorie)
+      .single();
+    return data;
+  };
+
+  // Helper: stuur email en log het
+  const sendCampaignEmail = async (to, subject, html) => {
+    const { data, error } = await resend.emails.send({
+      from: 'Betaalopvolging Nederland <noreply@mail.fixjebetaling.nl>',
+      to, subject, html
+    });
+    if (error) throw new Error(JSON.stringify(error));
+    return data.id;
+  };
+
+  try {
+    // ── STAP 2: 5 dagen na Mail 1 ──────────────────────────────
+    const fiveDaysAgo = new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: step2List } = await supabase
+      .from('email_campaigns')
+      .select('*, cases(*)')
+      .eq('current_step', 1)
+      .eq('status', 'sent')
+      .lt('email_1_sent_at', fiveDaysAgo);
+
+    for (const campaign of step2List || []) {
+      try {
+        const c = campaign.cases;
+        const template = await getTemplate('geen_communicatie');
+        if (!template || !c) continue;
+
+        const subject = fill(template.subject_template, c);
+        const html    = fill(template.body_template, c);
+        await sendCampaignEmail(campaign.debiteur_email, subject, html);
+
+        await supabase.from('email_campaigns')
+          .update({ current_step: 2, status: 'step2_sent', email_2_sent_at: now.toISOString() })
+          .eq('id', campaign.id);
+
+        await supabase.from('email_logs').insert([{
+          recipient_email: campaign.debiteur_email,
+          subject, status: 'sent'
+        }]);
+
+        results.step2_sent++;
+        console.log('Step 2 email sent to:', campaign.debiteur_email);
+      } catch (e) {
+        results.errors.push({ step: 2, campaign_id: campaign.id, error: e.message });
+        console.error('Step 2 error:', e.message);
+      }
+    }
+
+    // ── STAP 3: 7 dagen na Mail 2 ──────────────────────────────
+    const sevenDaysAgo = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: step3List } = await supabase
+      .from('email_campaigns')
+      .select('*, cases(*)')
+      .eq('current_step', 2)
+      .eq('status', 'step2_sent')
+      .lt('email_2_sent_at', sevenDaysAgo);
+
+    for (const campaign of step3List || []) {
+      try {
+        const c = campaign.cases;
+        const template = await getTemplate('financiele_moeilijkheden');
+        if (!template || !c) continue;
+
+        const subject = fill(template.subject_template, c);
+        const html    = fill(template.body_template, c);
+        await sendCampaignEmail(campaign.debiteur_email, subject, html);
+
+        await supabase.from('email_campaigns')
+          .update({ current_step: 3, status: 'step3_sent', email_3_sent_at: now.toISOString() })
+          .eq('id', campaign.id);
+
+        await supabase.from('email_logs').insert([{
+          recipient_email: campaign.debiteur_email,
+          subject, status: 'sent'
+        }]);
+
+        results.step3_sent++;
+        console.log('Step 3 email sent to:', campaign.debiteur_email);
+      } catch (e) {
+        results.errors.push({ step: 3, campaign_id: campaign.id, error: e.message });
+        console.error('Step 3 error:', e.message);
+      }
+    }
+
+    return res.json({ success: true, ...results });
+  } catch (error) {
+    console.error('Process campaigns error:', error);
     return res.status(500).json({ error: error.message });
   }
 });
