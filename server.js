@@ -199,7 +199,7 @@ app.post('/api/submit-case', async (req, res) => {
       }
     })();
 
-    // Create campaign in background (non-blocking)
+    // Create campaign in background (non-blocking) — alleen als er nog geen campagne bestaat
     (async () => {
       try {
         const { data: caseData } = await supabase
@@ -209,16 +209,27 @@ app.post('/api/submit-case', async (req, res) => {
           .single();
 
         if (caseData) {
-          await supabase
+          // Check of campagne al bestaat voor deze case
+          const { data: existingCampaign } = await supabase
             .from('email_campaigns')
-            .insert([{
-              case_id: caseData.id,
-              debiteur_email: email_debiteur,
-              current_step: 1,
-              status: 'sent',
-              email_1_sent_at: new Date().toISOString()
-            }]);
-          console.log('Campaign created for case:', caseData.id);
+            .select('id')
+            .eq('case_id', caseData.id)
+            .maybeSingle();
+
+          if (existingCampaign) {
+            console.log('Campaign already exists for case:', caseData.id);
+          } else {
+            await supabase
+              .from('email_campaigns')
+              .insert([{
+                case_id: caseData.id,
+                debiteur_email: email_debiteur,
+                current_step: 1,
+                status: 'sent',
+                email_1_sent_at: new Date().toISOString()
+              }]);
+            console.log('Campaign created for case:', caseData.id);
+          }
         }
       } catch (campaignError) {
         console.error('Campaign error:', campaignError.message);
