@@ -140,7 +140,7 @@ app.post('/api/submit-case', async (req, res) => {
 
         // Resend SDK v2 returns { data, error } — not a direct object
         const { data: emailData, error: emailSendError } = await resend.emails.send({
-          from: 'Betaalopvolging Nederland <noreply@notify.fixjebetaling.nl>',
+          from: 'Betaalopvolging Nederland <noreply@mail.fixjebetaling.nl>',
           to: email_debiteur,
           subject: subject,
           html: body
