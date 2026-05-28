@@ -365,7 +365,7 @@ app.put('/api/campaigns/:id/status', async (req, res) => {
 
     const { data, error } = await supabase
       .from('email_campaigns')
-      .update({ status, updated_at: new Date().toISOString() })
+      .update({ status })
       .eq('id', id)
       .select();
 
