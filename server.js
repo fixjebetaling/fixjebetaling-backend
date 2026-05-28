@@ -5,7 +5,7 @@ const { Resend } = require('resend');
 const cors = require('cors');
 
 // Validate required env vars at startup so failures are obvious in Railway logs
-const REQUIRED_ENV = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'RESEND_API_KEY', 'CRON_SECRET'];
+const REQUIRED_ENV = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'RESEND_API_KEY'];
 const missingEnv = REQUIRED_ENV.filter(k => !process.env[k]);
 if (missingEnv.length > 0) {
   console.error('FATAL: Missing environment variables:', missingEnv.join(', '));
