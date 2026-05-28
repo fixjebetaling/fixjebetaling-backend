@@ -34,17 +34,6 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date() });
 });
 
-// DEBUG DB
-app.get('/api/debug-db', async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('cases').select('count').limit(1);
-    if (error) return res.json({ ok: false, error: JSON.stringify(error) });
-    return res.json({ ok: true, supabase_url: process.env.SUPABASE_URL?.substring(0, 40) });
-  } catch (e) {
-    return res.json({ ok: false, error: e.message, stack: e.stack?.substring(0, 300) });
-  }
-});
-
 // SUBMIT CASE
 app.post('/api/submit-case', async (req, res) => {
   try {
