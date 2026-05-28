@@ -54,6 +54,7 @@ app.post('/api/submit-case', async (req, res) => {
     const type_indiening = b.typeIndiening || 'single';
     const reden_wanbetaling = b.redenWanbetaling;
     const extra_informatie = b.extraInformatie || '';
+    const bankgegevens = b.bankgegevens || '';
 
     console.log('Received case:', { factuurnummer, email_debiteur, bedrijfsnaam });
 
@@ -92,6 +93,7 @@ app.post('/api/submit-case', async (req, res) => {
         type_indiening,
         reden_wanbetaling,
         extra_informatie,
+        bankgegevens,
         email_categorie: categorie,
         status: 'submitted'
       }]);
@@ -140,6 +142,7 @@ app.post('/api/submit-case', async (req, res) => {
           email_debiteur:         email_debiteur || '',
           telefoon_debiteur:      telefoon_debiteur || '',
           type_indiening:         type_indiening || '',
+          bankgegevens:           bankgegevens || '',
         };
 
         const fill = (tmpl) => tmpl.replace(/{{(\w+)}}/g, (_, key) => vars[key] ?? '');
