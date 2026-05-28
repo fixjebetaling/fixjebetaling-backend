@@ -130,6 +130,8 @@ app.post('/api/submit-case', async (req, res) => {
         const body = template.body_template
           .replace(/{{factuurnummer}}/g, factuurnummer || '')
           .replace(/{{bedrag}}/g, bedrag || '')
+          .replace(/{{factuurdatum}}/g, factuurdatum || '')
+          .replace(/{{vervaldatum}}/g, vervaldatum || '')
           .replace(/{{debiteur_naam}}/g, debiteur_naam || '')
           .replace(/{{debiteur_contactpersoon}}/g, debiteur_contactpersoon || '')
           .replace(/{{bedrijfsnaam}}/g, bedrijfsnaam || '')
