@@ -38,23 +38,27 @@ app.get('/health', (req, res) => {
 app.post('/api/submit-case', async (req, res) => {
   try {
     const b = req.body;
-    const bedrijfsnaam = b.bedrijfsnaam;
-    const contactpersoon = b.contactpersoon;
-    const email_bedrijf = b.emailBedrijf;
-    const telefoon_bedrijf = b.telefoonBedrijf;
-    const debiteur_naam = b.debiteurNaam;
-    const debiteur_contactpersoon = b.debiteurContactpersoon || '';
-    const email_debiteur = b.emailDebiteur;
-    const telefoon_debiteur = b.telefoonDebiteur;
-    const factuurnummer = b.factuurnummer;
-    const bedrag = b.bedrag;
-    const factuurdatum = b.factuurdatum;
-    const vervaldatum = b.vervaldatum;
-    const omschrijving = b.omschrijving;
-    const type_indiening = b.typeIndiening || 'single';
-    const reden_wanbetaling = b.redenWanbetaling;
-    const extra_informatie = b.extraInformatie || '';
-    const bankgegevens = b.bankgegevens || '';
+    // Accept both Dutch field names (direct API) and English field names (Lovable website)
+    const bedrijfsnaam          = b.bedrijfsnaam          || b.companyName    || '';
+    const contactpersoon        = b.contactpersoon        || b.contactName    || '';
+    const email_bedrijf         = b.emailBedrijf          || b.email          || '';
+    const telefoon_bedrijf      = b.telefoonBedrijf       || b.phone          || '';
+    const debiteur_naam         = b.debiteurNaam          || b.debtorName     || '';
+    const debiteur_contactpersoon = b.debiteurContactpersoon || b.debtorContact || '';
+    const email_debiteur        = b.emailDebiteur         || b.debtorEmail    || '';
+    const telefoon_debiteur     = b.telefoonDebiteur      || b.debtorPhone    || '';
+    const factuurnummer         = b.factuurnummer         || b.invoiceNumber  || '';
+    const bedrag                = b.bedrag                || b.amount         || 0;
+    const factuurdatum          = b.factuurdatum          || b.invoiceDate    || '';
+    const vervaldatum           = b.vervaldatum           || b.dueDate        || '';
+    const omschrijving          = b.omschrijving          || b.description    || '';
+    const type_indiening        = b.typeIndiening         || b.submissionType || 'single';
+    const reden_wanbetaling     = b.redenWanbetaling      || b.reason         || '';
+    const extra_informatie      = b.extraInformatie       || b.additionalInfo || '';
+    // bankgegevens: direct veld OF samengesteld uit iban + tenaamstelling (Lovable)
+    const bankgegevens          = b.bankgegevens
+      || (b.iban ? `${b.iban}${b.accountHolder ? ' t.n.v. ' + b.accountHolder : ''}` : '')
+      || '';
 
     console.log('Received case:', { factuurnummer, email_debiteur, bedrijfsnaam });
 
@@ -73,37 +77,47 @@ app.post('/api/submit-case', async (req, res) => {
 
     console.log('Category:', categorie);
 
-    // Insert case in Supabase
-    const { error: caseError } = await supabase
+    // Check of case al bestaat (Lovable insert direct naar Supabase)
+    const { data: existingCase } = await supabase
       .from('cases')
-      .insert([{
-        bedrijfsnaam,
-        contactpersoon,
-        email_bedrijf,
-        telefoon_bedrijf,
-        debiteur_naam,
-        debiteur_contactpersoon,
-        email_debiteur,
-        telefoon_debiteur,
-        factuurnummer,
-        bedrag: bedrag ? parseFloat(bedrag) : 0,
-        factuurdatum,
-        vervaldatum,
-        omschrijving,
-        type_indiening,
-        reden_wanbetaling,
-        extra_informatie,
-        bankgegevens,
-        email_categorie: categorie,
-        status: 'submitted'
-      }]);
+      .select('id')
+      .eq('factuurnummer', factuurnummer)
+      .maybeSingle();
 
-    if (caseError) {
-      console.error('Case insert error:', JSON.stringify(caseError));
-      return res.status(500).json({ error: 'Database insert failed: ' + caseError.message });
+    if (existingCase) {
+      console.log('Case already exists (Lovable direct insert), skipping insert:', factuurnummer);
+    } else {
+      // Insert case in Supabase
+      const { error: caseError } = await supabase
+        .from('cases')
+        .insert([{
+          bedrijfsnaam,
+          contactpersoon,
+          email_bedrijf,
+          telefoon_bedrijf,
+          debiteur_naam,
+          debiteur_contactpersoon,
+          email_debiteur,
+          telefoon_debiteur,
+          factuurnummer,
+          bedrag: bedrag ? parseFloat(bedrag) : 0,
+          factuurdatum,
+          vervaldatum,
+          omschrijving,
+          type_indiening,
+          reden_wanbetaling,
+          extra_informatie,
+          bankgegevens,
+          email_categorie: categorie,
+          status: 'submitted'
+        }]);
+
+      if (caseError) {
+        console.error('Case insert error:', JSON.stringify(caseError));
+        return res.status(500).json({ error: 'Database insert failed: ' + caseError.message });
+      }
+      console.log('Case inserted successfully');
     }
-
-    console.log('Case inserted successfully');
 
     // Send email in background via Resend (non-blocking)
     (async () => {
